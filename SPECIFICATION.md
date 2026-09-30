@@ -5,7 +5,7 @@
 | **Project** | Browser-based AI development environment on CloudLab |
 | **Owner / operator** | OpenDev |
 | **Target system** | CloudLab (bwCloud, OpenStack, flavor L: 16 vCPU, 16 GB RAM, 400 GB), Debian, Docker + Arcane |
-| **Status** | 2026-09-30 – stage 1 implemented |
+| **Status** | 2026-09-30 – stages 1 and 2 implemented |
 
 ---
 
@@ -38,8 +38,8 @@ AI coding agent, VS Code and a desktop for GUI applications, all working on **on
 |---|---|---|
 | W1 | Sound from GUI apps is transmitted via RustDesk. | implemented |
 | W2 | The terminal UI (TUI) can attach to the same session as the web UI. | prepared (`opencode attach`), untested |
-| W3 | Access only via HTTPS (NPM), no open ports. | open (stage 2) |
-| W4 | Local LLM (Ollama/HomePC) as a provider via a WireGuard tunnel. | open (stage 3/4) |
+| W3 | Access only via HTTPS (NPM), no open ports. | implemented |
+| W4 | Local LLM (Ollama/ANUBISN) as a provider via a WireGuard tunnel. | open (stage 3/4) |
 | W5 | Versions of all images are pinned and therefore reproducible. | partial (RustDesk) |
 
 ### 1.5 Out of scope
@@ -69,7 +69,7 @@ CloudLab host (Debian, Docker, Arcane, iptables MSS clamping)
 ├─ nginx-proxy-manager                  (existing, network proxy-net)
 │
 └─ Project "opencode" (Arcane)
-   ├─ opencode            Networks: proxy-net, backend    Ports 4096, 8443→8080
+   ├─ opencode            Networks: proxy-net, backend    no published ports (NPM → 4096 / 8080)
    │    OpenCode serve, code-server, sshd (internal), mise
    │    DISPLAY=:1, PULSE_SERVER=unix:/tmp/pulse/native
    ├─ opencode-desktop    Network: backend                no ports
@@ -93,6 +93,7 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 | Persistent machine ID | RustDesk derives its ID from the machine ID. Without a fixed machine ID, every build would produce a new ID. |
 | `extra_hosts` → `host-gateway` | hbbs runs in the host network. This avoids the VM connecting to its own floating IP (hairpin NAT). |
 | Absolute bind mounts | Arcane runs Compose from inside its own container. Relative paths would be resolved incorrectly there. |
+| No published ports, NPM as the only entry point | TLS with Let's Encrypt, a single hardened entry point (80/443) and no direct exposure of the web UIs. |
 | MSS clamping instead of MTU adjustment | Works for all existing and future Docker networks without recreating them (host MTU 1442). |
 
 ---
@@ -102,7 +103,7 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 ### 4.1 OpenCode
 | ID | Requirement |
 |---|---|
-| F-OC-01 | The web UI listens on port 4096 and is protected by HTTP basic auth (`OPENCODE_SERVER_USERNAME` / `_PASSWORD`). |
+| F-OC-01 | The web UI listens internally on port 4096, is reachable only via NPM over HTTPS and is protected by HTTP basic auth (`OPENCODE_SERVER_USERNAME` / `_PASSWORD`). |
 | F-OC-02 | Provider keys are set via `.env` or `/connect`. Credentials are stored in `share/`. |
 | F-OC-03 | The MCP servers `playwright` (`http://playwright-mcp:8931/mcp`) and `context7` (remote) are configured in `config/opencode/opencode.json`. |
 | F-OC-04 | Agent permissions: the agent must not read `.env`, `*.pem`, `*.key`, SSH keys or `auth.json`. `sudo`, `su` and `docker` are forbidden. Other shell commands require confirmation. |
@@ -111,7 +112,7 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 ### 4.2 code-server
 | ID | Requirement |
 |---|---|
-| F-CS-01 | Container port 8080, published as 8443, with its own password (`CODE_SERVER_PASSWORD`, required). |
+| F-CS-01 | Container port 8080, reachable only via NPM over HTTPS, with its own password (`CODE_SERVER_PASSWORD`, required). |
 | F-CS-02 | Working directory `/repos`, identical to OpenCode's. |
 | F-CS-03 | Extensions are installed from Open VSX and stored in `share/code-server`. |
 
@@ -148,6 +149,7 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 | F-BT-02 | Health checks: `opencode` checks code-server `/healthz` and port 4096, `desktop` checks `xdpyinfo :1`. |
 | F-BT-03 | Log rotation for all containers: json-file, 10 MB × 3. |
 | F-BT-04 | The start phase of `opencode` may take up to 600 s (toolchain installation). |
+| F-BT-05 | NPM proxy hosts use websockets, Let's Encrypt, forced HTTPS, HTTP/2 and `proxy_read_timeout 3600s` / `proxy_buffering off` for streamed agent responses. |
 
 ---
 
@@ -157,7 +159,7 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 |---|---|---|
 | NF-01 | Security | All web entry points are password-protected. Empty passwords prevent startup (`:?` in Compose). |
 | NF-02 | Security | `no-new-privileges` for all containers. `desktop` and `playwright-mcp` run with `cap_drop: ALL`, `opencode` only with the required capabilities. |
-| NF-03 | Security | Port 22 of the container is not published. Dedicated deploy keys are used, not the host's SSH keys. |
+| NF-03 | Security | No container ports are published (4096, 8080, 22 internal only). Dedicated deploy keys are used, not the host's SSH keys. |
 | NF-04 | Resources | Limits: opencode 8 GB / 8 CPU, desktop 2 GB / 2 CPU, playwright 2 GB / 2 CPU, plus PID limits. |
 | NF-05 | Persistence | No user data is lost after `docker compose down/up` or an image rebuild. |
 | NF-06 | Portability | The stack can be moved to another Docker host with an `.env` and the host folders. |
@@ -183,8 +185,8 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 ### 6.2 Network interfaces
 | Interface | Direction | Port / protocol |
 |---|---|---|
-| OpenCode Web | external → opencode | TCP 4096 (HTTP) |
-| code-server | external → opencode | TCP 8443 → 8080 (HTTP) |
+| OpenCode Web | external → NPM → opencode | TCP 443 (HTTPS) → 4096 |
+| code-server | external → NPM → opencode | TCP 443 (HTTPS) → 8080 |
 | MCP Playwright | opencode → playwright-mcp | TCP 8931 (internal) |
 | RustDesk registration | desktop → hbbs (host) | UDP/TCP 21116 |
 | RustDesk relay | desktop → hbbr (host) | TCP 21117 |
@@ -196,8 +198,8 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 
 | No. | Test | Expected result | Status |
 |---|---|---|---|
-| A1 | Open `http://<server>:4096` | Login prompt, then the OpenCode UI | ✔ |
-| A2 | Open `http://<server>:8443` | code-server login, then the `/repos` folder | ✔ |
+| A1 | Open `https://opencode.<domain>` | Login prompt, then the OpenCode UI | ✔ |
+| A2 | Open `https://code.<domain>` | code-server login, then the `/repos` folder | ✔ |
 | A3 | Agent: "Open example.com with Playwright" | Tool call `playwright_*`, page title is reported | open |
 | A4 | `docker exec opencode curl https://open-vsx.org` | HTTP 200 in under 2 s | ✔ |
 | A5 | `uv add PyQt5 && uv run python main.py` | Window appears on the RustDesk desktop | ✔ |
@@ -206,12 +208,13 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 | A8 | Redeploy the stack twice in a row | RustDesk ID unchanged, no "New machine ID created" message | open |
 | A9 | Empty password in `.env` | Deploy aborts with an error message | ✔ |
 | A10 | Recreate the containers | Sessions, extensions and venv are preserved | open |
+| A11 | `curl -m 5 http://<server-ip>:4096` and `:8443` from outside | Timeout (ports closed) | ✔ |
+| A12 | `curl -sI https://opencode.<domain>` | `HTTP/2 401` (TLS + basic auth) | ✔ |
 
 ---
 
 ## 8. Known limitations
 
-- HTTP without TLS on 4096/8443 until stage 2 (NPM) is implemented.
 - A RustDesk connection without a direct route goes through the relay. Latency depends on the connection.
 - Software rendering: GUI performance is sufficient for tools and tests, not for 3D.
 - The heartbeat to `:21114` (RustDesk Pro API) fails. This is expected with the OSS server and harmless.
@@ -225,7 +228,7 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 | Stage | Content | Status |
 |---|---|---|
 | 1 | Stack on CloudLab: OpenCode, code-server, MCPs, desktop with RustDesk, audio | ✔ |
-| 2 | NPM proxy hosts with HTTPS for 4096/8080, remove `ports:`, close the security group | open |
-| 3 | WireGuard: gateway LXC in the homelab connects outbound to CloudLab. Network `llm-net`, DNAT only to `HomePC:11434` | open |
-| 4 | Ollama as an OpenAI-compatible provider in `opencode.json`, `OLLAMA_CONTEXT_LENGTH` ≥ 32768, Wake-on-LAN for HomePC, cloud provider as fallback | open |
+| 2 | NPM proxy hosts with HTTPS for 4096/8080, remove `ports:`, close the security group | ✔ |
+| 3 | WireGuard: gateway LXC in the homelab connects outbound to CloudLab. Network `llm-net`, DNAT only to `ANUBISN:11434` | open |
+| 4 | Ollama as an OpenAI-compatible provider in `opencode.json`, `OLLAMA_CONTEXT_LENGTH` ≥ 32768, Wake-on-LAN for ANUBISN, cloud provider as fallback | open |
 | 5 | Version pinning of all images and backup automation | open |

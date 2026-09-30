@@ -5,9 +5,9 @@
 #   /opt/cloudlab/stacks/opencode/{repos,share,state,agents,config,ssh,build,desktop,desktop-config,x11,pulse}
 #   x11/ additionally: chmod 1777
 #
-# Access:
-#   http://<server>:4096  -> OpenCode Web  (basic auth)
-#   http://<server>:8443  -> code-server   (password)
+# Access (via Nginx Proxy Manager, HTTPS only – no published ports):
+#   https://opencode.<domain>  -> http://opencode:4096  OpenCode Web  (basic auth)
+#   https://code.<domain>      -> http://opencode:8080  code-server   (password)
 #   RustDesk ID from the "desktop" log -> GUI windows of the apps
 
 name: opencode
@@ -54,10 +54,11 @@ services:
       - /opt/cloudlab/stacks/opencode/x11:/tmp/.X11-unix        # desktop X11 socket
       - /opt/cloudlab/stacks/opencode/pulse:/tmp/pulse          # desktop audio socket
 
-    # Plain HTTP – passwords unencrypted. Replace with NPM + HTTPS later.
-    ports:
-      - "4096:4096"
-      - "8443:8080"
+    # No published ports: access only through NPM (proxy-net) with HTTPS.
+    # For local debugging via SSH tunnel only:
+    # ports:
+    #   - "127.0.0.1:4096:4096"
+    #   - "127.0.0.1:8443:8080"
     networks:
       - proxy-net
       - backend

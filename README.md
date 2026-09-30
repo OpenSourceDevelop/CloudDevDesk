@@ -7,8 +7,8 @@ including mouse, keyboard and sound.
 
 ```
  Laptop / on the road
- ├─ Browser ──────────── :4096 ──▶ OpenCode Web ─┐
- ├─ Browser ──────────── :8443 ──▶ code-server  ─┤  Container "opencode"
+ ├─ Browser ── HTTPS ──▶ NPM ──▶ OpenCode Web ─┐
+ ├─ Browser ── HTTPS ──▶ NPM ──▶ code-server  ─┤  Container "opencode"
  └─ RustDesk client ──▶ hbbs/hbbr (host) ◀── RustDesk ──┐   (/repos, .venv, mise)
                                                          │        │  DISPLAY=:1
                                Container "opencode-desktop"        │  PULSE_SERVER
@@ -60,7 +60,7 @@ Because Compose runs from inside Arcane, **all bind mounts use absolute paths**.
   sudo iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
   sudo apt install iptables-persistent        # persist the rule
   ```
-- In the bwCloud security group: allow TCP 4096 and 8443 as long as NPM/HTTPS is not in use yet
+- In the bwCloud security group: only TCP 80 and 443 (NPM / Let's Encrypt) are needed; 4096 and 8443 stay closed
 
 ## Installation
 
@@ -92,6 +92,28 @@ Then create a project `opencode` in **Arcane**, paste `compose.yaml`, fill in th
 `.env.example` and deploy. The first start takes a few minutes because both images are built
 and the mise toolchains are installed.
 
+### Nginx Proxy Manager (HTTPS)
+
+The `opencode` container publishes no ports; it is only reachable through NPM on `proxy-net`.
+Create two proxy hosts:
+
+| | OpenCode | code-server |
+|---|---|---|
+| Domain | `opencode.<domain>` | `code.<domain>` |
+| Forward | `http://opencode:4096` | `http://opencode:8080` |
+| Options | Websockets ✔, Block Common Exploits ✔ | Websockets ✔, Block Common Exploits ✔ |
+| SSL | Let's Encrypt, Force SSL, HTTP/2 | Let's Encrypt, Force SSL, HTTP/2 |
+
+Add this to the **Advanced** tab of both hosts – OpenCode streams responses, and the default
+buffering/60 s timeouts would cut off or delay long agent runs:
+
+```nginx
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+proxy_buffering off;
+client_max_body_size 100m;
+```
+
 To find the RustDesk key:
 ```bash
 sudo docker exec rustdesk-hbbs cat /root/id_ed25519.pub    # or: sudo find / -name id_ed25519.pub -path '*rust*'
@@ -118,8 +140,8 @@ sudo docker exec rustdesk-hbbs cat /root/id_ed25519.pub    # or: sudo find / -na
 
 | What | How |
 |---|---|
-| OpenCode Web | `http://<server>:4096`, user and password from `.env` |
-| VS Code | `http://<server>:8443`, open the project folder **`/repos/<project>`**, not the host path |
+| OpenCode Web | `https://opencode.<domain>`, user and password from `.env` |
+| VS Code | `https://code.<domain>`, open the project folder **`/repos/<project>`**, not the host path |
 | TUI on the same session | in the code-server terminal: `opencode attach http://127.0.0.1:4096` |
 | GUI desktop | RustDesk client, ID from the `opencode-desktop` log, permanent password. Turn off **view-only mode** in the client. |
 | Python project | `cd /repos/<project> && uv init && uv add PyQt5 && uv run python main.py` |
@@ -150,11 +172,13 @@ desktop. `aplay` and other ALSA programs are routed there too via `/etc/asound.c
 | RustDesk: view only, no input | Turn off view-only mode in the **client** |
 | RustDesk ID changes | If `desktop-config/machine-id` is missing or not owned by 1000, `start.sh` starts with a new ID |
 | `Audio: N` in the desktop log | `pulse/` missing or not writable, or `~/.config` owned by root (desktop image too old) |
+| Agent responses stop after ~60 s or arrive in one chunk | NPM advanced config missing (`proxy_read_timeout`, `proxy_buffering off`) |
+| code-server terminal/editor won't connect | Websockets Support not enabled on the NPM proxy host |
 | Harmless log messages | `libcuda.so.1`, `vsda … not found`, `authorized_keys not found`, `:21114/api/heartbeat` (RustDesk Pro only), `Owner of /tmp/.X11-unix` |
 
 ## Security
 
-- OpenCode and code-server provide shell access. Use long passwords and **HTTPS via NPM** instead of open ports.
+- OpenCode and code-server provide shell access. Use long passwords. Access is **HTTPS-only via NPM**; no container ports are published.
 - Desktop container runs without capabilities (`cap_drop: ALL`). OpenCode only has the capabilities its entrypoint needs.
 - `opencode.json` prevents the agent from reading `.env`, keys and `auth.json`, and blocks `sudo` and `docker`.
 - This is container isolation, not a VM. `/repos` should only contain code the agent is allowed to see.
@@ -162,7 +186,7 @@ desktop. `aplay` and other ALSA programs are routed there too via `/etc/asound.c
 ## Roadmap
 
 1. ✅ Stack on CloudLab with cloud providers, MCPs and GUI desktop including audio
-2. ⏳ HTTPS via NPM, close open ports
+2. ✅ HTTPS via NPM, open ports closed
 3. ⏳ WireGuard tunnel to the homelab and network `llm-net`
 4. ⏳ Ollama on HomePC (RTX 5080) as a local provider in `opencode.json`
 
