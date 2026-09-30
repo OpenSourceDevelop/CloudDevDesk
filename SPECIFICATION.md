@@ -39,7 +39,7 @@ AI coding agent, VS Code and a desktop for GUI applications, all working on **on
 | W1 | Sound from GUI apps is transmitted via RustDesk. | implemented |
 | W2 | The terminal UI (TUI) can attach to the same session as the web UI. | prepared (`opencode attach`), untested |
 | W3 | Access only via HTTPS (NPM), no open ports. | open (stage 2) |
-| W4 | Local LLM (Ollama/ANUBISN) as a provider via a WireGuard tunnel. | open (stage 3/4) |
+| W4 | Local LLM (Ollama/HomePC) as a provider via a WireGuard tunnel. | open (stage 3/4) |
 | W5 | Versions of all images are pinned and therefore reproducible. | partial (RustDesk) |
 
 ### 1.5 Out of scope
@@ -226,6 +226,6 @@ Shared host folders:  x11/ (X11 socket) · pulse/ (audio socket)
 |---|---|---|
 | 1 | Stack on CloudLab: OpenCode, code-server, MCPs, desktop with RustDesk, audio | ✔ |
 | 2 | NPM proxy hosts with HTTPS for 4096/8080, remove `ports:`, close the security group | open |
-| 3 | WireGuard: gateway LXC in the homelab connects outbound to CloudLab. Network `llm-net`, DNAT only to `ANUBISN:11434` | open |
-| 4 | Ollama as an OpenAI-compatible provider in `opencode.json`, `OLLAMA_CONTEXT_LENGTH` ≥ 32768, Wake-on-LAN for ANUBISN, cloud provider as fallback | open |
+| 3 | WireGuard: gateway LXC in the homelab connects outbound to CloudLab. Network `llm-net`, DNAT only to `HomePC:11434` | open |
+| 4 | Ollama as an OpenAI-compatible provider in `opencode.json`, `OLLAMA_CONTEXT_LENGTH` ≥ 32768, Wake-on-LAN for HomePC, cloud provider as fallback | open |
 | 5 | Version pinning of all images and backup automation | open |
